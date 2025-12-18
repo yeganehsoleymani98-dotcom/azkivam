@@ -8,7 +8,9 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
+import openpyxl from openpyxl.utils import get_column_letter
 
+# Commonly used by Instagram web requests (unofficial; can change)
 X_IG_APP_ID = "936619743392459"
 
 DEFAULT_HEADERS = {
@@ -42,10 +44,12 @@ def get_instagram_metadata(
     for attempt in range(max_retries + 1):
         r = s.get(api, params=params, headers=headers, timeout=timeout_s, allow_redirects=False)
 
+        # Redirect usually means login/consent wall
         if r.status_code in (301, 302, 303, 307, 308):
             loc = r.headers.get("Location", "")
             raise RuntimeError(f"{username}: redirected (likely login/consent required): {loc}")
 
+        # Rate limit
         if r.status_code == 429:
             retry_after = r.headers.get("Retry-After")
             if retry_after and retry_after.isdigit():
@@ -85,7 +89,6 @@ def read_usernames_from_file(path: str) -> List[str]:
             u = line.strip()
             if not u or u.startswith("#"):
                 continue
-            # allow full urls too
             u = u.replace("https://www.instagram.com/", "").strip("/")
             names.append(u)
     return names
@@ -95,11 +98,45 @@ def write_csv(path: str, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
     fieldnames = sorted({k for row in rows for k in row.keys()})
-    with open(path, "w", newline="", encoding="utf-8") as f:
+
+    # ✅ Excel-friendly Persian: UTF-8 with BOM
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for row in rows:
-            w.writerow(row)
+            w.writerow({k: ("" if row.get(k) is None else row.get(k)) for k in fieldnames})
+
+
+def write_xlsx(path: str, rows: List[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    if openpyxl is None:
+        raise RuntimeError("openpyxl is not installed. Install it with: conda install -c conda-forge openpyxl -y")
+
+    fieldnames = sorted({k for row in rows for k in row.keys()})
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "instagram_profiles"
+
+    # Header
+    ws.append(fieldnames)
+
+    # Rows
+    for row in rows:
+        ws.append([("" if row.get(k) is None else row.get(k)) for k in fieldnames])
+
+    # Optional: autosize columns (simple heuristic)
+    for col_idx, col_name in enumerate(fieldnames, start=1):
+        max_len = len(str(col_name))
+        for r in rows:
+            v = r.get(col_name)
+            if v is None:
+                continue
+            max_len = max(max_len, len(str(v)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 80)
+
+    wb.save(path)
 
 
 def main() -> int:
@@ -107,9 +144,10 @@ def main() -> int:
     p.add_argument("usernames", nargs="*", help="Instagram usernames (e.g., instagram natgeo).")
     p.add_argument("-f", "--file", help="Text file with usernames (one per line).")
     p.add_argument("--json-out", help="Write full results to a JSON file.")
-    p.add_argument("--csv-out", help="Write results to a CSV file.")
+    p.add_argument("--csv-out", help="Write results to a CSV file (UTF-8 with BOM for Excel).")
+    p.add_argument("--xlsx-out", help="Write results to an XLSX file (best for Persian).")
     p.add_argument("--sleep", type=float, default=5.0, help="Seconds to sleep between profiles (default: 5).")
-    p.add_argument("--timeout", type=int, default=5, help="HTTP timeout seconds (default: 15).")
+    p.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds (default: 15).")
     p.add_argument("--retries", type=int, default=3, help="Max retries on 429/transient errors (default: 3).")
     args = p.parse_args()
 
@@ -118,6 +156,7 @@ def main() -> int:
     if args.file:
         usernames.extend(read_usernames_from_file(args.file))
 
+    # de-dupe preserving order
     seen = set()
     usernames = [u for u in usernames if not (u in seen or seen.add(u))]
 
@@ -149,6 +188,9 @@ def main() -> int:
 
     if args.csv_out:
         write_csv(args.csv_out, results)
+
+    if args.xlsx_out:
+        write_xlsx(args.xlsx_out, results)
 
     return 0
 
