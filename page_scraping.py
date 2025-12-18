@@ -8,7 +8,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
-import openpyxl from openpyxl.utils import get_column_letter
+import openpyxl
+from openpyxl.utils import get_column_letter
 
 # Commonly used by Instagram web requests (unofficial; can change)
 X_IG_APP_ID = "936619743392459"
@@ -75,8 +76,6 @@ def get_instagram_metadata(
             "followers": (user.get("edge_followed_by") or {}).get("count"),
             "following": (user.get("edge_follow") or {}).get("count"),
             "posts": (user.get("edge_owner_to_timeline_media") or {}).get("count"),
-            "is_private": user.get("is_private"),
-            "is_verified": user.get("is_verified"),
         }
 
     raise RuntimeError(f"{username}: failed after retries (repeated 429 or transient errors)")
