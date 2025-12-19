@@ -44,3 +44,4 @@ rfm.head()
 top_customers = rfm[rfm['RFM_Score'] >= 13].sort_values('RFM_Score', ascending=False)
 top_customers.head()
 
+###
